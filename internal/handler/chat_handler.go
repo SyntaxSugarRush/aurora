@@ -90,9 +90,8 @@ func (h *ChatHandler) Nightmare(c *gin.Context) {
 
 	// 工具调用模式判定
 	toolsEnabled := toolCallingEnabled(original_request.Tools, h.cfg)
-	if toolsEnabled && h.cfg.StreamMode {
-		original_request.Stream = false
-	}
+	// 注意:不再强制 stream=false。客户端请求流式时,handleToolCalling 会把
+	// 最终结果合成 OpenAI SSE 增量(role → text → tool_calls → finish → usage)。
 
 	// Convert the chat request to a ChatGPT request
 	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, account, proxyUrl, client)
@@ -669,6 +668,10 @@ func (h *ChatHandler) handleToolCalling(c *gin.Context, originalRequest *officia
 	if maxRefusalRetries <= 0 {
 		maxRefusalRetries = 3
 	}
+	// 客户端(Hermes 默认 stream=true)请求流式时,工具调用结果会被回放成
+	// OpenAI SSE 增量序列;上游对话本身仍走非流式(refusal-retry 需要完整文本)。
+	wantStream := originalRequest.Stream && h.cfg.StreamMode
+	startTime := time.Now()
 
 	baseTranslated := chatgptrequestconverter.ConvertAPIRequest(*originalRequest, account, *proxyUrl, *client)
 	if baseTranslated.ConversationID != "" {
@@ -682,6 +685,7 @@ func (h *ChatHandler) handleToolCalling(c *gin.Context, originalRequest *officia
 
 	var lastToolCalls []officialtypes.ToolCall
 	var lastText string
+	var lastCleanText string
 	var lastConversationID string
 	var lastSentinel []map[string]interface{}
 
@@ -720,7 +724,7 @@ func (h *ChatHandler) handleToolCalling(c *gin.Context, originalRequest *officia
 
 		// 解析 <tool_call>{...}</tool_call>
 		parser := toolcall.NewParser()
-		_, calls := parser.Feed(result.Text)
+		cleanText, calls := parser.Feed(result.Text)
 		if len(calls) == 0 {
 			_, extraCalls := parser.Flush()
 			calls = append(calls, extraCalls...)
@@ -736,14 +740,33 @@ func (h *ChatHandler) handleToolCalling(c *gin.Context, originalRequest *officia
 		}
 		if len(calls) > 0 {
 			lastToolCalls = calls
+			// cleanText 是剔除 <tool_call> 块后的正文;RecoverFromText 兜底
+			// 命中的情况下 parser 没识别出标签,无法安全剥离,正文置空
+			// (与非流式 JSON 路径行为一致:有 tool_calls 时 content 为 null)。
+			if strings.Contains(result.Text, toolcall.StartTag) {
+				lastCleanText = strings.TrimSpace(cleanText)
+			} else {
+				lastCleanText = ""
+			}
 			break
 		}
+		lastCleanText = result.Text
 		if !looksLikeSandboxRefusal(result.Text) {
 			break
 		}
 		if attempt < maxRefusalRetries-1 {
 			fmt.Fprintf(os.Stderr, "[chatgpt] tool refusal detected (attempt %d/%d), retrying\n", attempt+1, maxRefusalRetries)
 		}
+	}
+
+	if wantStream {
+		includeUsage := originalRequest.StreamOptions != nil && originalRequest.StreamOptions.IncludeUsage
+		if len(lastToolCalls) > 0 {
+			synthesizeToolCallStream(c, lastCleanText, lastToolCalls, *reqModel, lastConversationID, *inputTokens, includeUsage, startTime)
+		} else {
+			synthesizeToolCallStream(c, lastText, nil, *reqModel, lastConversationID, *inputTokens, includeUsage, startTime)
+		}
+		return
 	}
 
 	if len(lastToolCalls) > 0 {

@@ -210,3 +210,51 @@ func TestConvertAPIRequestToolChoiceNoneStripsProtocol(t *testing.T) {
 		t.Fatalf("missing none-warning: %s", text)
 	}
 }
+
+func TestConvertAPIRequestResolvesToolNameFromCallID(t *testing.T) {
+	// Hermes 等 OpenAI 客户端在 role=tool 消息里只带 tool_call_id 不带 name;
+	// 必须从前一条 assistant 消息的 tool_calls 反查出工具名。
+	req := official.APIRequest{
+		Model: "gpt-5",
+		Tools: []official.Tool{
+			{Type: "function", Function: official.ToolFunction{Name: "terminal"}},
+		},
+		Messages: []official.APIMessage{
+			official.NewTextMessage("user", "list files"),
+			{Role: "assistant", ToolCalls: []official.ToolCallRef{{ID: "call_abc123", Type: "function", Function: struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}{Name: "terminal", Arguments: `{"command":"ls"}`}}}},
+			{Role: "tool", ToolCallID: "call_abc123", Content: official.MessageContent{TextValue: "a.go\nb.go"}},
+		},
+	}
+	out := testConvert(t, req)
+	var toolMsg string
+	for _, m := range out.Messages {
+		if m.Author.Role == "tool" {
+			toolMsg, _ = m.Content.Parts[0].(string)
+		}
+	}
+	if !strings.Contains(toolMsg, "Resultado da ferramenta terminal") {
+		t.Fatalf("tool name not resolved from tool_call_id: %q", toolMsg)
+	}
+}
+
+func TestConvertAPIRequestToolNameFallbackWhenIDUnknown(t *testing.T) {
+	req := official.APIRequest{
+		Model: "gpt-5",
+		Messages: []official.APIMessage{
+			{Role: "tool", ToolCallID: "call_unknown", Content: official.MessageContent{TextValue: "out"}},
+		},
+	}
+	out := testConvert(t, req)
+	var toolMsg string
+	for _, m := range out.Messages {
+		if m.Author.Role == "tool" {
+			toolMsg, _ = m.Content.Parts[0].(string)
+		}
+	}
+	if !strings.Contains(toolMsg, "Resultado da ferramenta tool") {
+		t.Fatalf("fallback name missing: %q", toolMsg)
+	}
+}

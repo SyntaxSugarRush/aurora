@@ -104,6 +104,20 @@ func ConvertAPIRequest(api_request official_types.APIRequest, account *accounts.
 		chatgpt_request.AddMessage("system", strings.Join(systemMessages, "\n\n"))
 	}
 
+	// tool_call_id → 工具名映射:OpenAI 客户端(Hermes 等)在 role=tool 消息里
+	// 通常只带 tool_call_id 不带 name,从历史 assistant 消息的 tool_calls 里反查。
+	toolNameByID := make(map[string]string)
+	for _, apiMessage := range api_request.Messages {
+		if apiMessage.Role != "assistant" {
+			continue
+		}
+		for _, tc := range apiMessage.ToolCalls {
+			if tc.ID != "" && tc.Function.Name != "" {
+				toolNameByID[tc.ID] = tc.Function.Name
+			}
+		}
+	}
+
 	for _, apiMessage := range api_request.Messages {
 		if apiMessage.Role == "system" {
 			continue // 已合并到头部
@@ -111,6 +125,9 @@ func ConvertAPIRequest(api_request official_types.APIRequest, account *accounts.
 		// 工具结果消息:role=tool/function
 		if apiMessage.IsToolResult() {
 			toolName := apiMessage.Name
+			if toolName == "" {
+				toolName = toolNameByID[apiMessage.ToolCallID]
+			}
 			if toolName == "" {
 				toolName = "tool"
 			}

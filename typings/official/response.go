@@ -171,7 +171,7 @@ type ChatCompletion struct {
 }
 type Msg struct {
 	Role             string     `json:"role"`
-	Content          string     `json:"content"`
+	Content          *string    `json:"content"`
 	ReasoningContent string     `json:"reasoning_content,omitempty"`
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
@@ -229,7 +229,7 @@ func NewChatCompletionWithToolCalls(fullText string, reasoningContent string, to
 		Choices: []Choice{
 			{
 				Message: Msg{
-					Content:          derefString(contentPtr),
+					Content:          contentPtr,
 					ReasoningContent: reasoningContent,
 					Role:             "assistant",
 					ToolCalls:        toolCalls,

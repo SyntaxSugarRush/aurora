@@ -14,6 +14,7 @@ import (
 	"aurora/internal/accounts"
 	"aurora/internal/chatgpt"
 	"aurora/internal/config"
+	"aurora/internal/httpstream"
 	chatgpt_types "aurora/typings/chatgpt"
 	officialtypes "aurora/typings/official"
 	"aurora/util"
@@ -247,6 +248,79 @@ func writeChatCompletionStreamDone(c *gin.Context, stopSent bool, model string, 
 		c.Writer.WriteString("data: " + finalLine.String() + "\n\n")
 		c.Writer.Flush()
 	}
+	c.Writer.WriteString("data: [DONE]\n\n")
+	c.Writer.Flush()
+}
+
+// synthesizeToolCallStream 把工具调用模式的最终结果回放成标准 OpenAI SSE 流。
+// 上游调用本身是非流式的(refusal-retry 需要完整文本才能判定重试),
+// 这里把 (text, tool_calls) 组合成客户端(Hermes 等)期望的增量序列:
+// role chunk → 可选 text delta → 每个 tool_call 的 head(id/type/name)+arguments
+// → finish_reason → 可选 usage → [DONE]。
+func synthesizeToolCallStream(c *gin.Context, text string, calls []officialtypes.ToolCall, model, conversationID string, inputTokens int, includeUsage bool, startTime time.Time) {
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+
+	writeChunk := func(chunk officialtypes.ChatCompletionChunk) {
+		c.Writer.WriteString("data: " + chunk.String() + "\n\n")
+		c.Writer.Flush()
+	}
+
+	roleChunk := officialtypes.NewChatCompletionChunk("", model)
+	roleChunk.Choices[0].Delta.Role = "assistant"
+	if conversationID != "" {
+		roleChunk.ConversationID = conversationID
+	}
+	writeChunk(roleChunk)
+
+	if text != "" {
+		textChunk := officialtypes.NewChatCompletionChunk(text, model)
+		if conversationID != "" {
+			textChunk.ConversationID = conversationID
+		}
+		writeChunk(textChunk)
+	}
+
+	for _, call := range calls {
+		head := officialtypes.NewToolCallChunk(model, officialtypes.ToolCallDelta{
+			Index:    call.Index,
+			ID:       call.ID,
+			Type:     "function",
+			Function: officialtypes.ToolCallFuncDelta{Name: call.Function.Name},
+		})
+		if conversationID != "" {
+			head.ConversationID = conversationID
+		}
+		writeChunk(head)
+
+		if call.Function.Arguments != "" {
+			args := officialtypes.NewToolCallChunk(model, officialtypes.ToolCallDelta{
+				Index:    call.Index,
+				Function: officialtypes.ToolCallFuncDelta{Arguments: call.Function.Arguments},
+			})
+			if conversationID != "" {
+				args.ConversationID = conversationID
+			}
+			writeChunk(args)
+		}
+	}
+
+	if len(calls) > 0 {
+		writeChunk(officialtypes.NewToolCallStopChunk(model, conversationID))
+	} else {
+		writeChunk(officialtypes.StopChunkWithConversation("stop", model, conversationID))
+	}
+
+	if includeUsage {
+		outputTokens := util.CountToken(text)
+		for _, call := range calls {
+			outputTokens += util.CountToken(call.Function.Name) + util.CountToken(call.Function.Arguments)
+		}
+		httpstream.WriteUsageChunk(c, model, inputTokens, outputTokens, 0, 0, time.Since(startTime).Milliseconds(), 0, false)
+	}
+
 	c.Writer.WriteString("data: [DONE]\n\n")
 	c.Writer.Flush()
 }
