@@ -673,6 +673,16 @@ func (h *ChatHandler) handleToolCalling(c *gin.Context, originalRequest *officia
 	wantStream := originalRequest.Stream && h.cfg.StreamMode
 	startTime := time.Now()
 
+	// 请求历史里是否已有真实工具结果 —— 决定伪造执行检测是否启用
+	// (多轮对话中模型引用真实输出时不应触发伪造检测)。
+	hasToolResults := false
+	for _, m := range originalRequest.Messages {
+		if m.IsToolResult() {
+			hasToolResults = true
+			break
+		}
+	}
+
 	baseTranslated := chatgptrequestconverter.ConvertAPIRequest(*originalRequest, account, *proxyUrl, *client)
 	if baseTranslated.ConversationID != "" {
 		*clientState = h.sessions.Get(baseTranslated.ConversationID)
@@ -703,6 +713,26 @@ func (h *ChatHandler) handleToolCalling(c *gin.Context, originalRequest *officia
 				"type":    "request_conversion_error",
 				"param":   "model",
 				"code":    "request_conversion_error",
+			}})
+			return
+		}
+		// 上游 4xx/5xx 不是 SSE 流 —— 直接读出错误体返回给客户端,
+		// 不要静默吞掉再回放成"空 200"(原行为会让调试无从下手)。
+		if response.StatusCode >= 400 {
+			bodyBytes, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if wsConn != nil {
+				wsConn.Close()
+			}
+			snippet := string(bodyBytes)
+			if len(snippet) > 512 {
+				snippet = snippet[:512]
+			}
+			fmt.Fprintf(os.Stderr, "[chatgpt] tool-call upstream error %d: %s\n", response.StatusCode, snippet)
+			c.JSON(response.StatusCode, gin.H{"error": gin.H{
+				"message": fmt.Sprintf("upstream ChatGPT error %d: %s", response.StatusCode, snippet),
+				"type":    "upstream_error",
+				"code":    response.StatusCode,
 			}})
 			return
 		}
@@ -751,11 +781,15 @@ func (h *ChatHandler) handleToolCalling(c *gin.Context, originalRequest *officia
 			break
 		}
 		lastCleanText = result.Text
-		if !looksLikeSandboxRefusal(result.Text) {
+		// 重试条件:沙箱拒绝 / 首回合伪造执行 / 空响应(模型什么都没产出)。
+		retryable := looksLikeSandboxRefusal(result.Text) ||
+			(!hasToolResults && looksLikeFabricatedExecution(result.Text)) ||
+			strings.TrimSpace(result.Text) == ""
+		if !retryable {
 			break
 		}
 		if attempt < maxRefusalRetries-1 {
-			fmt.Fprintf(os.Stderr, "[chatgpt] tool refusal detected (attempt %d/%d), retrying\n", attempt+1, maxRefusalRetries)
+			fmt.Fprintf(os.Stderr, "[chatgpt] tool refusal/fabrication detected (attempt %d/%d), retrying\n", attempt+1, maxRefusalRetries)
 		}
 	}
 

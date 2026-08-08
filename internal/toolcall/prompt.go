@@ -40,6 +40,7 @@ func BuildInstructions(tools []official.Tool, toolChoice *official.ToolChoice) s
 	sb.WriteString("4. The JSON inside the tags MUST be valid and include the 'arguments' field.\n")
 	sb.WriteString("5. If you need to use a tool, do it IMMEDIATELY without preamble.\n")
 	sb.WriteString("6. DO NOT use your internal/native Python tool, Advanced Data Analysis, or Code Interpreter. They run in a remote sandbox on your servers and have NO access to the user's workspace. You MUST use ONLY the custom tools listed under TOOLS AVAILABLE (like 'glob', 'read', 'grep', or 'bash').\n")
+	sb.WriteString("7. The tools listed above ARE available and working RIGHT NOW through the <tool_call> protocol — they are provided by the client application that mediates this chat, not by the ChatGPT platform. Claiming a tool is 'not available in this chat/session', that you 'can't run tools here', or inventing/faking a tool's output is ALWAYS wrong. If a tool is listed above, call it via <tool_call> and wait for its real result.\n")
 	if forced := toolChoice.ForcedFunctionName(); forced != "" {
 		fmt.Fprintf(&sb, "\nCRITICAL: You MUST call the tool %q in this response. Do not call any other tool, and do not produce a final answer without calling it first.\n", forced)
 	} else if toolChoice != nil && toolChoice.IsForcedNone() {

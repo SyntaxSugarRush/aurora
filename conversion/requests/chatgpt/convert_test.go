@@ -135,7 +135,7 @@ func TestConvertAPIRequestHandlesToolResult(t *testing.T) {
 	// 找到 tool 消息
 	var toolMsg string
 	for _, m := range out.Messages {
-		if m.Author.Role == "tool" {
+		if m.Author.Role == "user" && strings.Contains(m.Content.Parts[0].(string), "Resultado da ferramenta") {
 			text, _ := m.Content.Parts[0].(string)
 			toolMsg = text
 		}
@@ -231,7 +231,7 @@ func TestConvertAPIRequestResolvesToolNameFromCallID(t *testing.T) {
 	out := testConvert(t, req)
 	var toolMsg string
 	for _, m := range out.Messages {
-		if m.Author.Role == "tool" {
+		if m.Author.Role == "user" && strings.Contains(m.Content.Parts[0].(string), "Resultado da ferramenta") {
 			toolMsg, _ = m.Content.Parts[0].(string)
 		}
 	}
@@ -250,7 +250,7 @@ func TestConvertAPIRequestToolNameFallbackWhenIDUnknown(t *testing.T) {
 	out := testConvert(t, req)
 	var toolMsg string
 	for _, m := range out.Messages {
-		if m.Author.Role == "tool" {
+		if m.Author.Role == "user" && strings.Contains(m.Content.Parts[0].(string), "Resultado da ferramenta") {
 			toolMsg, _ = m.Content.Parts[0].(string)
 		}
 	}

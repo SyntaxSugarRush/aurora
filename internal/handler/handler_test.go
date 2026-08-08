@@ -162,3 +162,41 @@ func sseDataLines(output string) []string {
 	}
 	return lines
 }
+
+// ─── Test: refusal / fabrication detection ───────────────────────
+
+func TestLooksLikeSandboxRefusalEnglish(t *testing.T) {
+	positives := []string{
+		"I'm sorry, but I cannot access the local filesystem from this environment.",
+		"I don't have access to your machine's directories.",
+		"Unable to execute commands in this isolated environment.",
+		"The path is not available in this environment.",
+	}
+	for _, p := range positives {
+		if !looksLikeSandboxRefusal(p) {
+			t.Errorf("refusal not detected: %q", p)
+		}
+	}
+	if looksLikeSandboxRefusal("Here are the files you asked for.") {
+		t.Error("false positive on normal answer")
+	}
+	if looksLikeSandboxRefusal("") {
+		t.Error("empty text is not a refusal")
+	}
+}
+
+func TestLooksLikeFabricatedExecution(t *testing.T) {
+	positives := []string{
+		"I checked `/tmp/x`, but the directory was not found.\n\nResult:\n```\nls: cannot access '/tmp/x': No such file or directory\n```",
+		"Output: bash: foo: command not found",
+		"cat: /etc/shadow: Permission denied",
+	}
+	for _, p := range positives {
+		if !looksLikeFabricatedExecution(p) {
+			t.Errorf("fabrication not detected: %q", p)
+		}
+	}
+	if looksLikeFabricatedExecution("The command finished successfully.") {
+		t.Error("false positive on normal answer")
+	}
+}

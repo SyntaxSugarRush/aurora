@@ -65,7 +65,9 @@ DEBUG_TOOL_LOG=tool_debug.log          # trace tool parsing when debugging
 `~/.hermes/config.yaml`:
 
 ```yaml
-model: gpt-5-6            # any of: auto, gpt-5-6[-thinking|-pro],
+model: gpt-5-6            # recommended for tool use (gpt-5-5-instant also good;
+                          # avoid "auto" — inconsistent tool-call compliance)
+                          # choices: auto, gpt-5-6[-thinking|-pro],
                           # gpt-5-5-{instant,thinking,pro}, gpt-5,
                           # gpt-4o, gpt-4o-mini, o3, o4-mini[-high]
 providers:
@@ -84,9 +86,16 @@ usage accounting all work.
 - **Tool-call turns are buffered, not live-streamed.** The model's answer is
   collected fully (to allow refusal retries), then replayed as SSE. Chat turns
   without tools stream live as usual.
-- Tool results arrive at the model as `Tool (name): <output>` text, and the
-  model is nudged to treat them as ground truth. Multi-hop tool loops work,
-  but expect the occasional format slip — `REFUSAL_RETRIES` absorbs most.
+- **Model compliance is stochastic.** The ChatGPT Web model sometimes denies
+  the tools exist or fabricates a tool output instead of emitting
+  `<tool_call>`. Aurora detects both (English + Portuguese patterns) and
+  retries (`REFUSAL_RETRIES`, default 3), which absorbs most failures.
+  Measured first-attempt tool-call rates: `gpt-5-6` and `gpt-5-5-instant`
+  ~100%, `gpt-5-6-thinking` ~75%, `auto` ~50%. **Use `gpt-5-6` or
+  `gpt-5-5-instant` for agent workloads; avoid `auto`.**
+- Tool results arrive at the model as a user-role message
+  (`Tool (name): <output>` — ChatGPT Web rejects a literal `tool` author role
+  with a 500), and the model is nudged to treat them as ground truth.
 - `temperature`/`top_p`/penalties are best-effort: ChatGPT Web does not expose
   sampling controls, so they're injected as prompt hints only.
 

@@ -343,6 +343,34 @@ func looksLikeSandboxRefusal(text string) bool {
 		"falha na interface de execução", "falha no parsing",
 		"inferência baseada na estrutura", "inferencia baseada na estrutura",
 		"baseada apenas na estrutura",
+		// English: 拒绝/声称无权限
+		"i cannot access", "i can't access", "i do not have access", "i don't have access",
+		"i cannot run", "i can't run", "i cannot execute", "i can't execute",
+		"unable to access", "unable to run", "unable to execute", "unable to read",
+		"isolated environment", "sandbox environment", "sandboxed environment",
+		"not available in this environment", "in the available environment",
+		"no access to the", "not able to access",
+	}
+	for _, m := range markers {
+		if strings.Contains(t, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// looksLikeFabricatedExecution 检测模型"伪造执行":没有发出 <tool_call>,
+// 却凭空编造了一段命令输出("ls: cannot access ..."、"No such file or directory")。
+// 仅在请求历史里没有任何真实工具结果时启用 —— 多轮对话中模型引用真实
+// 工具输出时也会包含这些字符串,不能误判。
+func looksLikeFabricatedExecution(text string) bool {
+	if text == "" {
+		return false
+	}
+	t := strings.ToLower(text)
+	markers := []string{
+		"cannot access", "no such file or directory",
+		"permission denied", "command not found",
 	}
 	for _, m := range markers {
 		if strings.Contains(t, m) {

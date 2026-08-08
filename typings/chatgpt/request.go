@@ -107,9 +107,11 @@ func (c *ChatGPTRequest) AddAssistantMessage(input string) {
 // AddToolMessage 追加一个 role=tool 的消息,把客户端执行工具的结果回传给上游。
 // toolName 形如 "bash";result 是工具返回的字符串(可能含换行)。
 func (c *ChatGPTRequest) AddToolMessage(toolName, result string) {
-	// 包成 "Tool (Resultado da ferramenta bash): ..." 文本格式以兼容  协议
+	// 以 user 角色发送:ChatGPT Web 的 /f/conversation 不接受 author.role="tool"
+	// 的消息(会 500 "something seems to have gone wrong"),user 角色 + 文本
+	// 前缀是上游能消化的唯一形态。文本格式保持与  协议一致。
 	text := "Tool (Resultado da ferramenta " + toolName + "): " + result
-	c.AddMessage("tool", text)
+	c.AddMessage("user", text)
 }
 
 func isStringPart(part interface{}) bool {
