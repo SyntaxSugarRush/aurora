@@ -1,5 +1,10 @@
 # AURORA
 
+> **Fork note (SyntaxSugarRush):** this fork adds out-of-the-box
+> [Hermes Agent](https://github.com/NousResearch/hermes-agent) compatibility —
+> streaming tool calls, `tool_call_id` name resolution, spec-correct
+> `content: null`, and full-JSON-Schema tool prompts. See [HERMES.md](HERMES.md).
+
 Aurora converts the ChatGPT Web backend into an OpenAI-style API, supporting chat, Responses, file-based Q&A, image generation, image variations, speech-to-text, text-to-speech, model listings, and obtaining a valid ChatGPT `access_token` via `refresh_token` / `session_token`.
 
 ## API Documentation
