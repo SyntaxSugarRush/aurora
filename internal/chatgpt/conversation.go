@@ -320,8 +320,21 @@ func Handle_request_error(c *gin.Context, response *http.Response) bool {
 			}})
 			return true
 		}
+		detail := error_response["detail"]
+		// 413 message_length_exceeds_limit:附上可操作指引(总提交上限 ~20k tokens,
+		// 含 aurora 注入的工具协议块)。
+		if response.StatusCode == 413 {
+			if m, ok := detail.(map[string]interface{}); ok {
+				if msg, ok := m["message"].(string); ok {
+					m["message"] = msg + " — ChatGPT Web caps the total submission at ~20k tokens (including Aurora's injected tool-protocol block). Reduce context: in Hermes set providers.aurora.context_length=12000 so compaction triggers before the cap."
+					detail = m
+				}
+			} else if s, ok := detail.(string); ok {
+				detail = s + " — ChatGPT Web caps the total submission at ~20k tokens (including Aurora's injected tool-protocol block). Reduce context: in Hermes set providers.aurora.context_length=12000 so compaction triggers before the cap."
+			}
+		}
 		c.JSON(response.StatusCode, gin.H{"error": gin.H{
-			"message": error_response["detail"],
+			"message": detail,
 			"type":    response.Status,
 			"param":   nil,
 			"code":    "error",

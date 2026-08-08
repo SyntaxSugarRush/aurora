@@ -71,11 +71,15 @@ model: gpt-5-6            # recommended for tool use (gpt-5-5-instant also good;
                           # gpt-5-5-{instant,thinking,pro}, gpt-5,
                           # gpt-4o, gpt-4o-mini, o3, o4-mini[-high]
 providers:
-  custom:
-    name: aurora
+  aurora:
+    name: Aurora (ChatGPT Web)
     base_url: http://127.0.0.1:8080/v1
-    api_key: choose-a-local-api-key    # must match Authorization env; any
-                                       # value works if Authorization is unset
+    api_key: hermes-local-key
+    default_model: gpt-5-6
+    discover_models: true
+    context_length: 12000   # IMPORTANT: ChatGPT Web caps submissions at ~20k
+                            # tokens total (incl. Aurora's tool block). 12000
+                            # makes Hermes compact before hitting the cap.
 ```
 
 Then `hermes` as usual. Tool calling, streaming, parallel tool calls, and
@@ -83,6 +87,14 @@ usage accounting all work.
 
 ## Known limitations (inherent to ChatGPT Web emulation)
 
+- **Upstream submission cap ≈ 20k tokens** (measured on a free account:
+  18k passes, 21k → `413 message_length_exceeds_limit`). The cap applies to
+  the TOTAL Aurora forwards upstream — your messages **plus** Aurora's
+  injected tool-protocol block (~4–6k tokens for a full Hermes toolset with
+  JSON schemas). Mitigation is configured in `providers.aurora.context_length:
+  12000` — Hermes then compacts before the payload can reach the cap. If you
+  still see a 413, `/compress` or `/new`; oversized tool-mode requests may
+  fail earlier with a sentinel 500 — same cause, same remedy.
 - **Tool-call turns are buffered, not live-streamed.** The model's answer is
   collected fully (to allow refusal retries), then replayed as SSE. Chat turns
   without tools stream live as usual.

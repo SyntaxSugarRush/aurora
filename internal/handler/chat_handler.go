@@ -729,6 +729,11 @@ func (h *ChatHandler) handleToolCalling(c *gin.Context, originalRequest *officia
 				snippet = snippet[:512]
 			}
 			fmt.Fprintf(os.Stderr, "[chatgpt] tool-call upstream error %d: %s\n", response.StatusCode, snippet)
+			// 413 message_length_exceeds_limit:ChatGPT Web 的总提交上限约 20k tokens
+			// (含 aurora 注入的工具协议块)。给客户端可操作的指引,而不是裸错误。
+			if response.StatusCode == 413 || strings.Contains(snippet, "message_length_exceeds_limit") {
+				snippet += " — ChatGPT Web caps the total submission at ~20k tokens (including Aurora's injected tool-protocol block). Reduce context: in Hermes set providers.aurora.context_length=12000 so compaction triggers before the cap."
+			}
 			c.JSON(response.StatusCode, gin.H{"error": gin.H{
 				"message": fmt.Sprintf("upstream ChatGPT error %d: %s", response.StatusCode, snippet),
 				"type":    "upstream_error",
