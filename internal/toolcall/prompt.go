@@ -1,9 +1,9 @@
 package toolcall
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
 	"aurora/typings/official"
@@ -49,6 +49,9 @@ func BuildInstructions(tools []official.Tool, toolChoice *official.ToolChoice) s
 }
 
 // compactToolsPrompt 把工具列表渲染成人可读的多行描述。
+// 每个工具附带完整的 minified JSON Schema —— 扁平化的 name/type/desc 摘要会
+// 丢失嵌套 object/array 结构,导致 Hermes 这类携带复杂 schema 的客户端
+// (cronjob、computer_use 等)参数质量下降;完整 schema 保真度最高。
 func compactToolsPrompt(tools []official.Tool) string {
 	var sb strings.Builder
 	for _, t := range tools {
@@ -61,54 +64,14 @@ func compactToolsPrompt(tools []official.Tool) string {
 			continue
 		}
 		fmt.Fprintf(&sb, "- %s: %s\n", t.Function.Name, t.Function.Description)
-		var schema struct {
-			Type       string                    `json:"type"`
-			Properties map[string]map[string]any `json:"properties"`
-			Required   []string                  `json:"required"`
-		}
 		if len(t.Function.Parameters) == 0 {
 			continue
 		}
-		if err := json.Unmarshal(t.Function.Parameters, &schema); err != nil || schema.Type != "object" || len(schema.Properties) == 0 {
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, t.Function.Parameters); err != nil {
 			continue
 		}
-		sb.WriteString("  Params:\n")
-		// 排序以保证稳定输出(便于测试和 prompt 缓存)
-		keys := make([]string, 0, len(schema.Properties))
-		for k := range schema.Properties {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			prop := schema.Properties[key]
-			isReq := "optional"
-			for _, r := range schema.Required {
-				if r == key {
-					isReq = "required"
-					break
-				}
-			}
-			desc, _ := prop["description"].(string)
-			typeStr, _ := prop["type"].(string)
-			if typeStr == "" {
-				typeStr = "string"
-			}
-			if enum, ok := prop["enum"].([]any); ok {
-				var opts []string
-				for _, e := range enum {
-					opts = append(opts, fmt.Sprint(e))
-				}
-				if desc != "" {
-					desc += " "
-				}
-				desc += "Options: [" + strings.Join(opts, ", ") + "]"
-			}
-			if desc != "" {
-				fmt.Fprintf(&sb, "    * %s (%s, %s): %s\n", key, typeStr, isReq, desc)
-			} else {
-				fmt.Fprintf(&sb, "    * %s (%s, %s)\n", key, typeStr, isReq)
-			}
-		}
+		fmt.Fprintf(&sb, "  Parameters (JSON Schema): %s\n", compact.String())
 	}
 	return sb.String()
 }
